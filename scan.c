@@ -1,17 +1,25 @@
 //
+//  Based on:
 //  Intel Edison Playground
 //  Copyright (c) 2015 Damian Kołakowski. All rights reserved.
 //
 
 #include <stdlib.h>
 #include <errno.h>
-#include <curses.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/hci_lib.h>
+
+#include "config.h"
+
+#define STATE_OPEN		0
+#define STATE_LOCKED	1
+
+extern int do_post(const int value);
 
 struct hci_request ble_hci_request(uint16_t ocf, int clen, void * status, void * cparam)
 {
@@ -24,6 +32,49 @@ struct hci_request ble_hci_request(uint16_t ocf, int clen, void * status, void *
 	rq.rparam = status;
 	rq.rlen = 1;
 	return rq;
+}
+
+static int64_t timeval_subtract(const struct timeval *data)
+{
+	int sec = 0;
+	long usec = 0;
+	struct timeval current;
+	gettimeofday(&current, NULL);
+
+	sec = current.tv_sec - data->tv_sec;
+	usec = current.tv_usec - data->tv_usec;
+
+	return (sec * 1000000ll + usec);
+}
+
+static void process_adv_info(le_advertising_info * info)
+{
+	static struct timeval open_at;
+	static int status = STATE_LOCKED;
+	int  new_status = 0;
+	char addr[18];
+
+	ba2str(&(info->bdaddr), addr);
+	//printf("%s - RSSI %d\n", addr, (char)info->data[info->length]);
+	if (strcmp(addr, BEACON_MAC_ADDR) == 0) {
+		gettimeofday(&open_at, NULL);
+		//printf("\t%s - RSSI %d\n", addr, (char)info->data[info->length]);
+	}
+	int64_t duration = timeval_subtract(&open_at);
+	//printf("duration %lld\n", duration);
+
+	new_status = (duration > 5000000) ? STATE_LOCKED : STATE_OPEN;
+
+	if (new_status != status) {
+		printf("\n===Start===\n");
+		printf("STATUS: %s\n", (new_status == STATE_OPEN) ? "OPEN" : "LOCKED");
+		do_post(new_status);
+		//sleep(1);
+		printf("\n===End===\n");
+		status = new_status;
+		if (new_status == STATE_OPEN)
+			gettimeofday(&open_at, NULL);
+	}
 }
 
 int main()
@@ -116,9 +167,7 @@ int main()
 				void * offset = meta_event->data + 1;
 				while ( reports_count-- ) {
 					info = (le_advertising_info *)offset;
-					char addr[18];
-					ba2str(&(info->bdaddr), addr);
-					printf("%s - RSSI %d\n", addr, (char)info->data[info->length]);
+					process_adv_info(info);
 					offset = info->data + info->length + 2;
 				}
 			}
