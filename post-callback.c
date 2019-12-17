@@ -29,7 +29,7 @@ static size_t read_callback(void *dest, size_t size, size_t nmemb, void *userp)
   return 0; /* no more data left to deliver */
 }
 
-int do_post(const int value)
+int do_post(const char* feed, const char* value)
 {
   CURL *curl;
   CURLcode res;
@@ -37,7 +37,7 @@ int do_post(const int value)
   struct WriteThis wt;
 
   char data[16];
-  sprintf(data, "value=%d", value);
+  sprintf(data, "value=%s", value);
 
   wt.readptr = data;
   wt.sizeleft = strlen(data);
@@ -55,7 +55,7 @@ int do_post(const int value)
   curl = curl_easy_init();
   if(curl) {
     char buf[128];
-    sprintf(buf, "https://io.adafruit.com/api/v2/%s/feeds/lock/data", IO_USERNAME);
+    sprintf(buf, "https://io.adafruit.com/api/v2/%s/feeds/%s/data", IO_USERNAME, feed);
     /* First set the URL that is about to receive our POST. */
     curl_easy_setopt(curl, CURLOPT_URL, buf);
 

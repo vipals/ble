@@ -19,7 +19,7 @@
 #define STATE_OPEN		0
 #define STATE_LOCKED	1
 
-extern int do_post(const int value);
+extern int do_post(const char* feed, const char* value);
 
 struct hci_request ble_hci_request(uint16_t ocf, int clen, void * status, void * cparam)
 {
@@ -47,6 +47,49 @@ static int64_t timeval_subtract(const struct timeval *data)
 	return (sec * 1000000ll + usec);
 }
 
+static int getVal16(uint8_t* data) {
+	int t = (data[1]&0xff)<<8;
+	t += (data[0]&0xff);
+	return t;
+}
+
+static void update_data(uint8_t* data, uint8_t length) {
+	float temperature;
+	float humidity;
+	int battery;
+	char buf[16];
+
+	if (length!=0x16 && length!=0x17 && length!=0x19)
+		return;
+	if (data[4]!=0x16 || data[5]!=0x95 || data[6]!=0xFE)
+		return;
+
+	switch (data[18]) {
+		case 0x0D:
+			temperature = getVal16(&data[21]) / 10.0;
+			humidity = getVal16(&data[23]) / 10.0;
+			//printf("temperature %g humidity %g\n", temperature, humidity);
+			break;
+		case 0x0A:
+			battery = data[21];
+			sprintf(buf, "%d", battery);
+			do_post("battery", buf);
+			break;
+		case 0x04:
+			temperature = getVal16(&data[21]) / 10.0;
+			sprintf(buf, "%g", temperature);
+			do_post("temperature", buf);
+			break;
+		case 0x06:
+			humidity = getVal16(&data[21]) / 10.0;
+			sprintf(buf, "%g", humidity);
+			do_post("humidity", buf);
+			break;
+		default:
+			return;
+	}
+}
+
 static void process_adv_info(le_advertising_info * info)
 {
 	static struct timeval open_at;
@@ -58,7 +101,10 @@ static void process_adv_info(le_advertising_info * info)
 	//printf("%s - RSSI %d\n", addr, (char)info->data[info->length]);
 	if (strcmp(addr, BEACON_MAC_ADDR) == 0) {
 		gettimeofday(&open_at, NULL);
-		//printf("\t%s - RSSI %d\n", addr, (char)info->data[info->length]);
+		printf("\t%s - RSSI %d\n", addr, (char)info->data[info->length]);
+	} else if (strcmp(addr, SENSOR_MAC_ADDR) == 0) {
+		update_data(info->data, info->length);
+		printf("\t%s - RSSI %d\n", addr, (char)info->data[info->length]);
 	}
 	int64_t duration = timeval_subtract(&open_at);
 	//printf("duration %lld\n", duration);
@@ -68,7 +114,7 @@ static void process_adv_info(le_advertising_info * info)
 	if (new_status != status) {
 		printf("\n===Start===\n");
 		printf("STATUS: %s\n", (new_status == STATE_OPEN) ? "OPEN" : "LOCKED");
-		do_post(new_status);
+		do_post("lock", (new_status == STATE_OPEN) ? "0" : "1");
 		//sleep(1);
 		printf("\n===End===\n");
 		status = new_status;
